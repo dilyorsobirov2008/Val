@@ -121,32 +121,42 @@ def graph_menu():
     builder.adjust(3)
     return builder.as_markup()
 
-# --- Grafik chizish ---
+# --- Grafik chizish (O'tgan kunlar ko'rinadigan qilib sozlandi) ---
 async def send_weekly_chart(message: types.Message, currency_code: str, lang: str):
+    # API dan 12 kunlik zaxira bilan ma'lumot so'raymiz (shanba-yakshanbalar uchun)
     end_date = datetime.now().strftime("%d.%m.%Y")
-    start_date = (datetime.now() - timedelta(days=7)).strftime("%d.%m.%Y")
+    start_date = (datetime.now() - timedelta(days=12)).strftime("%d.%m.%Y")
     url = f"https://cbu.uz/uz/arkhiv-kursov-valyut/json/{currency_code}/{start_date}/{end_date}/"
     try:
         r = requests.get(url, timeout=20)
         if r.status_code == 200:
-            data = r.json()[:7]
+            data = r.json()
+            # Eng oxirgi 7 ta o'zgarishni olamiz va teskari (eskidan yangiga) qilamiz
+            if len(data) > 7: data = data[:7]
             data.reverse()
+            
             dates = [item['Date'][:5] for item in data]
             rates = [float(item['Rate']) for item in data]
             
-            plt.figure(figsize=(8, 5))
-            plt.plot(dates, rates, marker='o', color='forestgreen', linewidth=2)
-            plt.title(f"{currency_code} - 7 Days Trend")
-            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.figure(figsize=(9, 5))
+            plt.plot(dates, rates, marker='o', color='forestgreen', linewidth=2.5, markersize=7)
+            
+            # Nuqtalar ustiga qiymatlarni yozish
+            for i, rate in enumerate(rates):
+                plt.text(i, rate, f"{rate:,.0f}", ha='center', va='bottom', fontsize=9, fontweight='bold')
+            
+            plt.title(f"{currency_code} - Last 7 Days Trend")
+            plt.grid(True, linestyle='--', alpha=0.5)
             
             buf = io.BytesIO()
-            plt.savefig(buf, format='png')
+            plt.savefig(buf, format='png', bbox_inches='tight')
             buf.seek(0)
             plt.close()
             
             photo = BufferedInputFile(buf.read(), filename="chart.png")
-            await message.answer_photo(photo)
+            await message.answer_photo(photo, caption=f"📊 <b>{currency_code}</b> trend")
     except Exception as e:
+        logging.error(f"Grafik xatosi: {e}")
         await message.answer("⚠️ System error while generating chart.")
 
 # --- Handlerlar ---
@@ -203,27 +213,21 @@ async def help_calc(message: types.Message):
 @dp.message(F.text)
 async def calculator(message: types.Message):
     text_lower = message.text.lower()
-    # "som" so'zi borligini tekshirish
-    is_uzs = "som" in text_lower or "so'm" in text_lower
-    
+    is_uzs = any(x in text_lower for x in ["som", "so'm", "somm", "sum"])
     match = re.search(r"(\d+[\d.,]*)", message.text)
     if match and cached_rates:
         try:
             amount = float(match.group(1).replace(',', '.'))
-            
             if is_uzs:
-                # 500 som deb yozilsa -> Valyutalarga o'girish
                 res = f"🔄 <b>{amount:,.0f} so'm miqdori:</b>\n\n"
                 for code, info in cached_rates.items():
                     val = amount / info['rate']
                     res += f"💰 {amount:,.0f} so'm = <b>{val:,.2f} {code}</b>\n"
             else:
-                # Shunchaki 500 yozilsa -> So'mga o'girish
                 res = f"🔄 <b>{amount:,.2f} (Valyuta) so'mga o'girilganda:</b>\n\n"
                 for code, info in cached_rates.items():
                     uzs = amount * info['rate']
                     res += f"💰 {amount:,.2f} <b>{code}</b> = <b>{uzs:,.2f} so'm</b>\n"
-            
             await message.answer(res, parse_mode="HTML")
         except: pass
 
